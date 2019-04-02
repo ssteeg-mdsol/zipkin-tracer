@@ -1,9 +1,13 @@
 language: ruby
+jdk:
+  - oraclejdk8
 rvm:
-- 2.1
-- 1.9.3
-- jruby
-- jruby-1.7.21
+  - 2.6.2
+  - 2.5.5
+  - 2.4.5
+  - 2.3.8
+  - jruby-9.1.17.0
+  - jruby-9.2.6.0
 deploy:
   provider: rubygems
   api_key:
@@ -11,4 +15,13 @@ deploy:
   gem: zipkin-tracer
   on:
     tags: true
-    repo: openzipkin/zipkin-tracer
+    repo: openzipkin/zipkin-ruby
+    condition: "$TRAVIS_RUBY_VERSION == 2.6.2"
+notifications:
+  webhooks:
+    urls:
+      - https://webhooks.gitter.im/e/637e968b45032d16ee26
+    on_success: change
+    on_failure: always
+    on_start: false
+script: "bundle exec rspec"

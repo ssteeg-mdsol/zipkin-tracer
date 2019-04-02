@@ -1,94 +1,95 @@
 require 'spec_helper'
-def using_scribe?
-  @scribe_server && defined?(::Scribe)
-end
-
-def using_kafka?
-  @zookeeper && RUBY_PLATFORM == 'java' && defined?(::Hermann)
-end
 
 module ZipkinTracer
   RSpec.describe Config do
-    [:service_name, :service_port, :scribe_server, :zookeeper, :sample_rate,
-     :scribe_max_buffer, :annotate_plugin, :filter_plugin, :whitelist_plugin,
-     :logger ].each do |method|
+    before do
+      allow(Application).to receive(:logger).and_return(Logger.new(nil))
+    end
+    [:service_name, :json_api_host,
+      :zookeeper, :log_tracing,
+      :annotate_plugin, :filter_plugin, :whitelist_plugin].each do |method|
       it "can set and read configuration values for #{method}" do
         value = rand(100)
-        config = Config.new(nil, {method => value})
+        config = Config.new(nil, { method => value })
         expect(config.send(method)).to eq(value)
+      end
+      it 'can set a sample rate between 0 and 1' do
+        config = Config.new(nil, sample_rate: 0.3)
+        expect(config.sample_rate).to eq(0.3)
       end
     end
 
-    it 'sets defaults for sample rate' do
+    it 'sets defaults' do
       config = Config.new(nil, {})
-      expect(config.sample_rate).to_not eq(nil)
-    end
-
-    it 'sets defaults for scribe_max_buffer' do
-      config = Config.new(nil, {})
-      expect(config.scribe_max_buffer).to_not eq(nil)
-    end
-
-    it 'sets defaults for service_port' do
-      config = Config.new(nil, {})
-      expect(config.service_port).to_not eq(nil)
+      [:sample_rate, :sampled_as_boolean, :trace_id_128bit].each do |key|
+        expect(config.send(key)).to_not eq(nil)
+      end
     end
 
     describe 'logger' do
-
-      it 'uses Rails logger if available' do
-        logger = 'TrusmisLogger'
-        object_double("Rails", logger: logger).as_stubbed_const
-
+      it 'uses the application logger' do
         config = Config.new(nil, {})
-        expect(config.logger).to eq(logger)
-      end
-
-      it 'uses STDOUT if nothing was provided and not using rails' do
-        config = Config.new(nil, {})
-        expect(config.logger).to be_kind_of(Logger)
+        expect(config.logger).to eq(Application.logger)
       end
     end
 
+    describe 'sampled_as_boolean' do
+      it 'does not warn when sampled_as_boolean is false' do
+        expect(Application.logger).to_not receive(:warn)
+        Config.new(nil, {sampled_as_boolean: false})
+      end
 
-    describe '#using_scribe?' do
-      it 'returns false if scribe server has not been set' do
-        config = Config.new(nil, {})
-        expect(config.using_scribe?).to eq(false)
+      it 'warns when sampled_as_boolean is not set' do
+        expect(Application.logger).to receive(:warn)
+        Config.new(nil, {})
       end
-      it 'returns false if Scribe is not in the project' do
-        hide_const('Scribe')
-        config = Config.new(nil, {scribe_server: 'http://server.yes.net'})
-        expect(config.using_scribe?).to eq(false)
-      end
-      it 'returns true if scribe server has been set' do
-        config = Config.new(nil, {scribe_server: 'http://server.yes.net'})
-        expect(config.using_scribe?).to eq(true)
+
+      it 'warns when sampled_as_boolean is true' do
+        expect(Application.logger).to receive(:warn)
+        Config.new(nil, {sampled_as_boolean: true})
       end
     end
 
-    def using_kafka?
-      @zookeeper && RUBY_PLATFORM == 'java' && defined?(::Hermann)
-    end
-
-    describe '#using_kafka?' do
-      it 'returns false if zookeeper has not been set' do
+    describe '#adapter' do
+      it 'returns nil if no adapter has been set' do
         config = Config.new(nil, {})
-        stub_const('Hermann', 'CoolGem')
-        stub_const('RUBY_PLATFORM', 'java')
-        expect(config.using_scribe?).to eq(false)
+        expect(config.adapter).to be_nil
       end
-      it 'returns false if Hermann is not in the project' do
-        hide_const('Hermann')
-        stub_const('RUBY_PLATFORM', 'java')
-        config = Config.new(nil, {zookeeper: 'http://server.yes.net'})
-        expect(config.using_scribe?).to eq(false)
+
+      context 'json' do
+        it 'returns :json if the json api endpoint has been set' do
+          config = Config.new(nil, json_api_host: 'http://server.yes.net')
+          expect(config.adapter).to eq(:json)
+        end
       end
-      it 'returns true if zookeeper and herman are used in java' do
-        stub_const('Hermann', 'CoolGem')
-        stub_const('RUBY_PLATFORM', 'java')
-        config = Config.new(nil, {zookeeper: 'http://server.yes.net'})
-        expect(config.using_kafka?).to eq(true)
+
+      context 'log_tracing' do
+        it 'returns :logger if log_tracing has been set to true' do
+          config = Config.new(nil, log_tracing: true)
+          expect(config.adapter).to eq(:logger)
+        end
+      end
+
+      context 'kafka' do
+        before { stub_const('RUBY_PLATFORM', 'java') }
+
+        it 'does not return :kafka if zookeeper has not been set' do
+          config = Config.new(nil, {})
+          stub_const('Hermann', 'CoolGem')
+          expect(config.adapter).to be_nil
+        end
+
+        it 'returns :kafka if zookeeper and Hermann are used in java' do
+          stub_const('Hermann', 'CoolGem')
+          config = Config.new(nil, zookeeper: 'http://server.yes.net')
+          expect(config.adapter).to eq(:kafka)
+        end
+
+        it 'returns :kafka_producer if producer is set' do
+          producer = double("Producer", push: true)
+          config = Config.new(nil, producer: producer)
+          expect(config.adapter).to eq(:kafka_producer)
+        end
       end
     end
   end
